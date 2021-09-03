@@ -8,6 +8,7 @@ function testing {
         write-verbose 'success'
     }
     catch {
-        write-verbose 'fail'        
+        write-verbose 'fail'  
+        throw      
     }
 }

@@ -6,6 +6,22 @@ function deletecopy ($source, $name) {
     $item = Get-ChildItem -path (split-path $source) "*$name*"
     Remove-Item $item -Force -Verbose
 }
+#Parse string code for syntax errors
+function Test-Syntax {
+    param
+    (
+        [Parameter(Mandatory,ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [Alias('text')]
+        [string]
+        $ScriptBlockText
+    )
+$tokens = $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($ScriptBlockText, [ref]$tokens, [ref]$errors)
+if ($errors) {
+    throw $errors
+}
+else {$ast}
+}
 #Recursive search up the AST for parent of a specific type
 function Get-AstParent {
     [CmdletBinding()]

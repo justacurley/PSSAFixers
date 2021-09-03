@@ -134,7 +134,7 @@ function Measure-WriteLog {
             $results = @()
             try {
                 #! Move this out
-                $FunctionFilter = funcfilter -ScriptBlockAst $ScriptBlockAst -AdditionalFunctions @('flush', 'New-Op', 'New-TClient', 'New-TDep', 'New-TItem', 'New-TReq', 'Send-JobMetrics', 'Stop-OpDT', 'Stop-OpRT', 'tdep', 'tevent', 'tex', 'tmetric', 'ttrace','start-retry')
+                $FunctionFilter = funcfilter -ScriptBlockAst $ScriptBlockAst -AdditionalFunctions @('flush', 'New-Op', 'New-TClient', 'New-TDep', 'New-TItem', 'New-TReq', 'Send-JobMetrics', 'Stop-OpDT', 'Stop-OpRT', 'tdep', 'tevent', 'tex', 'tmetric', 'ttrace', 'start-retry')
                 
                 #region Define predicates to find ASTs.
                 # Finds cmdlet calls
@@ -161,48 +161,63 @@ function Measure-WriteLog {
 
                 [System.Management.Automation.Language.Ast[]]$commandAst = $ScriptBlockAst.FindAll($predicate1, $true)          
                        
-                [hashtable]$ParentTryHash=@{}
+                $ParentTryHash = [hashtable]::Synchronized(@{})
                 $commandAst | ForEach-Object {
                     $currentCommandAst = $_
 
                     #Get TryStatementAst block, we are assuming it exists because of predicate1 
-                    $ParentTry = Get-AstParent -Ast $currentCommandAst -Reference $currentCommandAst.copy() -Type "System.Management.Automation.Language.TryStatementAst" -SearchDirection WithinType
+                    # $ParentTry = Get-AstParent -Ast $currentCommandAst -Reference $currentCommandAst.copy() -Type "System.Management.Automation.Language.TryStatementAst" -SearchDirection WithinType
                     #Do we already have a Write-Log?
                     $TryContainsWriteLog = $ParentTry.Body.Extent.Text -match "Write-Log"
-#                     if (-not $TryContainsWriteLog) {
-#                         $ParentOfLine = Get-AstParent -Ast $currentCommandAst -Reference $currentCommandAst.Copy() -SearchDirection LineNumber -LineNumber $currentCommandAst.Extent.StartLineNumber
-#                         #Add Write-Log Success
-#                         [int]$startLineNumber = $ParentOfLine.Extent.StartLineNumber
-#                         [int]$endLineNumber = $ParentOfLine.Extent.EndLineNumber
-#                         [int]$startColumnNumber = $ParentOfLine.Extent.StartColumnNumber
-#                         [int]$endColumnNumber = $ParentOfLine.Extent.EndColumnNumber
-#                         [string]$correction = @'
-# {0}
-# {1}
-# '@ -f $ParentOfLine.Extent.Text, 'Write-Log -Message "Success"'
-#                         [string]$file = $MyInvocation.MyCommand.Definition
-#                         [string]$optionalDescription = ''
+                    #                     if (-not $TryContainsWriteLog) {
+                    #                         $ParentOfLine = Get-AstParent -Ast $currentCommandAst -Reference $currentCommandAst.Copy() -SearchDirection LineNumber -LineNumber $currentCommandAst.Extent.StartLineNumber
+                    #                         #Add Write-Log Success
+                    #                         [int]$startLineNumber = $ParentOfLine.Extent.StartLineNumber
+                    #                         [int]$endLineNumber = $ParentOfLine.Extent.EndLineNumber
+                    #                         [int]$startColumnNumber = $ParentOfLine.Extent.StartColumnNumber
+                    #                         [int]$endColumnNumber = $ParentOfLine.Extent.EndColumnNumber
+                    #                         [string]$correction = @'
+                    # {0}
+                    # {1}
+                    # '@ -f $ParentOfLine.Extent.Text, 'Write-Log -Message "Success"'
+                    #                         [string]$file = $MyInvocation.MyCommand.Definition
+                    #                         [string]$optionalDescription = ''
                         
-#                         $correctionExtent = New-Object 'Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.CorrectionExtent' $startLineNumber, $endLineNumber, $startColumnNumber, $endColumnNumber, $correction, $description
-#                         $suggestedCorrections = New-Object System.Collections.ObjectModel.Collection['Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.CorrectionExtent']
-#                         $suggestedCorrections.add($correctionExtent) | out-null
+                    #                         $correctionExtent = New-Object 'Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.CorrectionExtent' $startLineNumber, $endLineNumber, $startColumnNumber, $endColumnNumber, $correction, $description
+                    #                         $suggestedCorrections = New-Object System.Collections.ObjectModel.Collection['Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.CorrectionExtent']
+                    #                         $suggestedCorrections.add($correctionExtent) | out-null
 
-#                         $result = [Microsoft.Windows.Powershell.ScriptAnalyzer.Generic.DiagnosticRecord]@{
-#                             "Message"              = "This is a rule with a suggested correction"
-#                             "Extent"               = $currentCommandAst.Extent
-#                             "RuleName"             = $PSCmdlet.MyInvocation.InvocationName
-#                             "Severity"             = "Warning"
-#                             "RuleSuppressionID"    = "MyRuleSuppressionID"
-#                             "SuggestedCorrections" = $suggestedCorrections
-#                         }
-#                         $results += $result
-#                     }
+                    #                         $result = [Microsoft.Windows.Powershell.ScriptAnalyzer.Generic.DiagnosticRecord]@{
+                    #                             "Message"              = "This is a rule with a suggested correction"
+                    #                             "Extent"               = $currentCommandAst.Extent
+                    #                             "RuleName"             = $PSCmdlet.MyInvocation.InvocationName
+                    #                             "Severity"             = "Warning"
+                    #                             "RuleSuppressionID"    = "MyRuleSuppressionID"
+                    #                             "SuggestedCorrections" = $suggestedCorrections
+                    #                         }
+                    #                         $results += $result
+                    #                     }
                     #Add Write-Log Faiure   
                     #Check if we have already created a correction for a commandast in this try block 
-                    if ($ParentTryHash.ContainsKey($ParentTry.GetHashCode())) {
-                        return
-                    } 
-                    else {$ParentTryHash.Add($ParentTry.GetHashCode(),@{})} 
+                    # Create synchronized hashtable for thread communication
+
+                    try {
+                        # Lock it   
+                        [System.Threading.Monitor]::Enter($PArentTryHash)
+                        $LockTaken = $true
+                        $ParentTry = Get-AstParent -Ast $currentCommandAst -Reference $currentCommandAst.copy() -Type "System.Management.Automation.Language.TryStatementAst" -SearchDirection WithinType
+                        if ($ParentTryHash.ContainsKey($ParentTry.GetHashCode())) {
+                            return
+                        } 
+                        else { $ParentTryHash.Add($ParentTry.GetHashCode(), @{}) } 
+                    }
+                    finally {
+                        if ($LockTaken) {
+                            # Release lock
+                            [System.Threading.Monitor]::Exit($PArentTryHash)
+                        }
+                    }
+
 
                     $CatchClause = $ParentTry.CatchClauses.Body
                     if ($CatchClause.Count -gt 1) {
@@ -215,7 +230,7 @@ function Measure-WriteLog {
                             $LastStatementInCatchClause = $CatchClause.Statements[-1]
                         }
                         else {
-                            $emptyCatch=$true
+                            $emptyCatch = $true
                             $LastStatementInCatchClause = $CatchClause
                         }
                         
@@ -272,12 +287,12 @@ function Measure-PSCallStack {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [System.Management.Automation.Language.ScriptBlockAst]
-        $ScriptBlockAst
+        $ScriptBlockAst,
+        [switch]$Testing
     )
 
     Process {
-        # $AstHash = Get-AstHash -Code $ScriptBlockAst
-        if ($null -ne $ScriptBlockAst.Parent) {
+        if (($null -ne $ScriptBlockAst.Parent) -or ($Testing)) {
             $results = @()
             try {
                 #region Define predicates to find ASTs.            
@@ -310,10 +325,15 @@ function Measure-PSCallStack {
                     [int]$startColumnNumber = $currentParamBlockAst.Extent.StartColumnNumber
                     [int]$endColumnNumber = $currentParamBlockAst.Extent.EndColumnNumber
                     [string]$correction = @'
-{0}
-{1}
-{2}
-'@ -f $currentParamBlockAst.Extent.Text, '$PSStack = Get-PSCallStack', '$F = $PSStack[0].Command'
+
+###Telemetry###
+$PSStack = Get-PSCallStack | Select-Object Command, Location
+$F = $PSStack[0].Command
+$PSDefaultParameterValues = $Global:PSDefaultParameterValues
+$RT = ntr -Name $F 
+$RS = $true 
+###Telemetry###
+'@ 
                     [string]$file = $MyInvocation.MyCommand.Definition
                     [string]$optionalDescription = ''
                     $correctionExtent = New-Object 'Microsoft.Windows.PowerShell.ScriptAnalyzer.Generic.CorrectionExtent' $startLineNumber, $endLineNumber, $startColumnNumber, $endColumnNumber, $correction, $description
@@ -321,11 +341,11 @@ function Measure-PSCallStack {
                     $suggestedCorrections.add($correctionExtent) | out-null
 
                     $result = [Microsoft.Windows.Powershell.ScriptAnalyzer.Generic.DiagnosticRecord]@{
-                        "Message"              = "This is a rule with a suggested correction"
+                        "Message"              = "Telemetry initialization missing from cmdlet, after param()"
                         "Extent"               = $currentParamBlockAst.Extent
                         "RuleName"             = $PSCmdlet.MyInvocation.InvocationName
                         "Severity"             = "Warning"
-                        "RuleSuppressionID"    = "MyRuleSuppressionID"
+                        "RuleSuppressionID"    = "TelemetryInitialization"
                         "SuggestedCorrections" = $suggestedCorrections
                     }
                     $results += $result
@@ -339,6 +359,6 @@ function Measure-PSCallStack {
         }
     }
 }
-Export-ModuleMember Measure-PSStack
+Export-ModuleMember Measure-PSCallStack
 
 
